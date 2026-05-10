@@ -1,0 +1,143 @@
+# =============================================================================
+# Gateway API (HTTPRoute)
+# Exposes Kestra at `<subdomain>.<hostedZoneName>` — e.g. kestra.${PublicHostedZoneName}.
+# =============================================================================
+gatewayApi:
+  enabled: false
+  subdomain: kestra
+  hostedZoneName: ""
+  parentRef:
+    name: alb
+    namespace: gateway-system
+    sectionName: https
+
+# =============================================================================
+# PostgreSQL — provisioned by postgres-operator (postgres.alpha-prosoft.com/v1
+# DatabaseInstance). The operator creates the database and role and writes a
+# Secret named `targetSecretName` with keys: host, port, database, username,
+# password, url. Kestra reads those via env vars (see `upstream.common.extraEnv`).
+#
+# If you change `targetSecretName` you must also update the `secretKeyRef.name`
+# entries under `upstream.common.extraEnv` to match.
+# =============================================================================
+database:
+  create: true
+  databaseName: kestra
+  targetSecretName: kestra-db
+
+# =============================================================================
+# S3 storage bucket — provisioned by the ACK S3 controller
+# (s3.services.k8s.aws/v1alpha1 Bucket). Used as Kestra's internal storage
+# backend. `bucketName` and `region` are also rendered into the Kestra storage
+# config (the kestra-extra-config ConfigMap) so they stay in sync with the
+# Bucket CR.
+# =============================================================================
+aws:
+  # AWS region for the bucket and Kestra's S3 client. Required.
+  region: ""
+  s3:
+    create: true
+    # Globally unique S3 bucket name. Required.
+    bucketName: ""
+    publicAccessBlock:
+      blockPublicACLs: true
+      blockPublicPolicy: true
+      ignorePublicACLs: true
+      restrictPublicBuckets: true
+    # Map of key: value tags applied to the bucket.
+    tags: {}
+
+# =============================================================================
+# Values forwarded to the upstream kestra chart. Anything in
+# https://github.com/kestra-io/helm-charts/blob/master/charts/kestra/values.yaml
+# can be overridden here.
+# =============================================================================
+upstream:
+  # Stable name so the Service the HTTPRoute targets stays "kestra".
+  nameOverride: kestra
+  fullnameOverride: kestra
+
+  # Image mirrored to our registry by this repo's CI; tag defaults to the
+  # upstream chart appVersion.
+  image:
+    repository: docker.io/alphaprosoft/kestra
+    pullPolicy: IfNotPresent
+
+  # Single standalone server, Postgres-backed, with the dind sidecar for
+  # script/shell tasks.
+  deployments:
+    standalone:
+      enabled: true
+      dind:
+        enabled: true
+    webserver:
+      enabled: false
+    executor:
+      enabled: false
+    indexer:
+      enabled: false
+    scheduler:
+      enabled: false
+    worker:
+      enabled: false
+
+  # dind sidecar image, also mirrored to our registry by CI.
+  dind:
+    enabled: true
+    base:
+      rootless:
+        image:
+          repository: docker.io/alphaprosoft/docker
+          tag: dind-rootless
+
+  common:
+    # Pull the Postgres connection details from the Secret created by
+    # postgres-operator and expose them as env vars referenced from the Kestra
+    # datasource config below.
+    extraEnv:
+      - name: KESTRA_PG_HOST
+        valueFrom:
+          secretKeyRef:
+            name: kestra-db
+            key: host
+      - name: KESTRA_PG_PORT
+        valueFrom:
+          secretKeyRef:
+            name: kestra-db
+            key: port
+      - name: KESTRA_PG_DATABASE
+        valueFrom:
+          secretKeyRef:
+            name: kestra-db
+            key: database
+      - name: KESTRA_PG_USERNAME
+        valueFrom:
+          secretKeyRef:
+            name: kestra-db
+            key: username
+      - name: KESTRA_PG_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: kestra-db
+            key: password
+
+  configurations:
+    # Static Kestra config. Placeholders are resolved at runtime from the env
+    # vars wired above. The S3 storage block is supplied separately by the
+    # kestra-extra-config ConfigMap this umbrella renders from `.Values.aws`.
+    application:
+      datasources:
+        postgres:
+          url: jdbc:postgresql://${KESTRA_PG_HOST}:${KESTRA_PG_PORT}/${KESTRA_PG_DATABASE}
+          driverClassName: org.postgresql.Driver
+          username: ${KESTRA_PG_USERNAME}
+          password: ${KESTRA_PG_PASSWORD}
+      kestra:
+        queue:
+          type: postgres
+        repository:
+          type: postgres
+    configmaps:
+      - name: kestra-extra-config
+        key: storage.yml
+    secrets: []

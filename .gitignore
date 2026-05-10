@@ -1,0 +1,4 @@
+# Helm dependency cache pulled at build time, not vendored.
+helm/**/charts/
+helm/**/Chart.lock
+helm/**/*.tgz

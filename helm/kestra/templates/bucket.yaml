@@ -1,0 +1,34 @@
+{{- if .Values.aws.s3.create -}}
+{{- $bucket := required "aws.s3.bucketName is required" .Values.aws.s3.bucketName -}}
+{{- $region := required "aws.region is required" .Values.aws.region -}}
+apiVersion: s3.services.k8s.aws/v1alpha1
+kind: Bucket
+metadata:
+  name: kestra
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: kestra
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: kestra
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-1"
+spec:
+  name: {{ $bucket | quote }}
+  {{- if ne $region "us-east-1" }}
+  createBucketConfiguration:
+    locationConstraint: {{ $region | quote }}
+  {{- end }}
+  {{- with .Values.aws.s3.publicAccessBlock }}
+  publicAccessBlock:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .Values.aws.s3.tags }}
+  tagging:
+    tagSet:
+      {{- range $k, $v := . }}
+      - key: {{ $k | quote }}
+        value: {{ $v | quote }}
+      {{- end }}
+  {{- end }}
+{{- end }}

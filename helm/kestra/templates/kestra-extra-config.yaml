@@ -1,0 +1,20 @@
+{{- $bucket := required "aws.s3.bucketName is required" .Values.aws.s3.bucketName -}}
+{{- $region := required "aws.region is required" .Values.aws.region -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kestra-extra-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app.kubernetes.io/name: kestra
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/part-of: kestra
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
+data:
+  storage.yml: |
+    kestra:
+      storage:
+        type: s3
+        s3:
+          bucket: {{ $bucket | quote }}
+          region: {{ $region | quote }}
