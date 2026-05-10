@@ -11,8 +11,8 @@ gatewayApi:
 # PostgreSQL provisioned by postgres-operator (DatabaseInstance -> Secret).
 database:
   create: true
-  databaseName: kestra
-  targetSecretName: kestra-db
+  databaseName: kestra-db
+  targetSecretName: kestra-master
 
 # S3 storage bucket provisioned by the ACK S3 controller (Bucket CR).
 # region and bucketName are required and also flow into Kestra's storage config.
