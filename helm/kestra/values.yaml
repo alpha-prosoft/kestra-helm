@@ -96,27 +96,27 @@ upstream:
       - name: KESTRA_PG_HOST
         valueFrom:
           secretKeyRef:
-            name: kestra-db
+            name: kestra-master
             key: host
       - name: KESTRA_PG_PORT
         valueFrom:
           secretKeyRef:
-            name: kestra-db
+            name: kestra-master
             key: port
       - name: KESTRA_PG_DATABASE
         valueFrom:
           secretKeyRef:
-            name: kestra-db
+            name: kestra-master
             key: database
       - name: KESTRA_PG_USERNAME
         valueFrom:
           secretKeyRef:
-            name: kestra-db
+            name: kestra-master
             key: username
       - name: KESTRA_PG_PASSWORD
         valueFrom:
           secretKeyRef:
-            name: kestra-db
+            name: kestra-master
             key: password
       - name: ENV_GIT_USERNAME
         valueFrom:
