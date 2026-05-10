@@ -11,6 +11,7 @@ adds:
 - a `Bucket` CR (ACK S3 controller, `s3.services.k8s.aws/v1alpha1`) for Kestra's
   internal storage backend
 - a Gateway API `HTTPRoute` (exposed at `kestra.${PublicHostedZoneName}`)
+- wiring for Kestra's mandatory basic auth (and an optional `SealedSecret` for it)
 - an optional **git source for workflows** — a bootstrap sidecar plus a
   `SyncFlows` flow that keeps a namespace in sync with a git repo
 - defaults that point Kestra at our mirrored images and at the Postgres/S3 above
@@ -30,6 +31,7 @@ Postgres (queue + repository) and S3 (storage).
 - `helm/kestra/templates/kestra-extra-config.yaml` — `kestra-extra-config` ConfigMap holding the S3 storage block (rendered from `aws.*`, mounted into Kestra via `upstream.configurations.configmaps`).
 - `helm/kestra/templates/git-sync.yaml` — `kestra-git-sync` ConfigMap holding the `system/git-flow-sync` flow (rendered from `git.*`); only when `git.enabled`.
 - `helm/kestra/templates/git-auth-sealedsecret.yaml` — `kestra-git-auth` `SealedSecret` (rendered from `git.auth.encrypted*`); only when those are set.
+- `helm/kestra/templates/basic-auth-sealedsecret.yaml` — `kestra-basic-auth` `SealedSecret` (rendered from `basicAuth.encrypted*`); only when those are set.
 - `helm/kestra/templates/httproute.yaml` — the Gateway API route.
 - `.github/workflows/build.yml` — mirrors the upstream chart + images, then publishes the umbrella.
 
@@ -60,6 +62,30 @@ upstream Docker Hub repos.
 ArgoCD provisions (and waits for) them before the Kestra workload that consumes
 the generated Secret.
 
+## Basic authentication
+
+Kestra requires basic auth since 0.24 — without it the API returns `401` and the
+UI shows a setup page. The chart wires `KESTRA_SECURITY_BASIC_AUTH_USERNAME` /
+`KESTRA_SECURITY_BASIC_AUTH_PASSWORD` (and the bootstrap sidecar's API
+credentials) from a Secret named **`kestra-basic-auth`** in the release namespace
+(keys **`username`** — a valid email — and **`password`**), with `optional: true`
+so a missing Secret doesn't crash the pod (git sync just fails with `401`).
+
+Provide that Secret yourself, or set these two values to have the chart render a
+`SealedSecret`:
+
+| value | → | key in the Secret |
+|---|---|---|
+| `basicAuth.encryptedUsername` | `SealedSecret.spec.encryptedData.username` | `username` |
+| `basicAuth.encryptedPassword` | `SealedSecret.spec.encryptedData.password` | `password` |
+
+Seal the **plaintext** values, scoped to that name and namespace:
+
+```sh
+printf %s 'admin@example.com' | kubeseal --raw -n kestra --name kestra-basic-auth   # -> basicAuth.encryptedUsername
+printf %s "$KESTRA_PASSWORD"  | kubeseal --raw -n kestra --name kestra-basic-auth   # -> basicAuth.encryptedPassword
+```
+
 ## Git source for workflows
 
 With `git.enabled: true`:
@@ -71,12 +97,13 @@ With `git.enabled: true`:
   `delete` configurable);
 - the `git-sync-bootstrap` sidecar (always present in the pod — it costs no
   extra scheduling slot, just a container) polls `:8081/health/readiness`, then
-  `POST`s that flow to the Kestra API (`PUT` to update if it already exists) and
+  `POST`s that flow to the Kestra API (`PUT` to update if it already exists,
+  authenticating with the `kestra-basic-auth` credentials — see above) and
   triggers one immediate sync. When `git.enabled` is false no ConfigMap is
   mounted and the sidecar just idles; override `upstream.common.extraContainers: []`
   to drop it entirely.
 
-The plugin ships in the `kestra/kestra` image, so nothing extra is needed.
+The git plugin ships in the `kestra/kestra` image, so nothing extra is needed.
 
 ### Private repo
 

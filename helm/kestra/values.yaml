@@ -48,6 +48,15 @@ git:
     encryptedUsername: ""
     encryptedPassword: ""
 
+# Kestra basic auth (mandatory since Kestra 0.24 — the API returns 401 until it
+# is configured). Credentials come from the kestra-basic-auth Secret (keys
+# username [a valid email] and password); the bootstrap sidecar uses them too.
+# Bring that Secret yourself, or set the kubeseal-encrypted values to have this
+# chart render a SealedSecret for it.
+basicAuth:
+  encryptedUsername: ""
+  encryptedPassword: ""
+
 # Values forwarded to the upstream kestra chart:
 # https://github.com/kestra-io/helm-charts/blob/master/charts/kestra/values.yaml
 upstream:
@@ -121,6 +130,18 @@ upstream:
             name: kestra-git-auth
             key: password
             optional: true
+      - name: KESTRA_SECURITY_BASIC_AUTH_USERNAME
+        valueFrom:
+          secretKeyRef:
+            name: kestra-basic-auth
+            key: username
+            optional: true
+      - name: KESTRA_SECURITY_BASIC_AUTH_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: kestra-basic-auth
+            key: password
+            optional: true
 
     extraVolumes:
       - name: kestra-git-sync
@@ -132,12 +153,17 @@ upstream:
       - name: git-sync-bootstrap
         image: docker.io/alphaprosoft/kestra:v1.3.16
         imagePullPolicy: IfNotPresent
+        envFrom:
+          - secretRef:
+              name: kestra-basic-auth
+              optional: true
         command: ["/bin/sh", "-c"]
         args:
           - |
             FLOW=/git-sync/flow.yml
             API=http://127.0.0.1:8080
             MGMT=http://127.0.0.1:8081
+            AUTH="${username:-}:${password:-}"
             if [ ! -f "$FLOW" ]; then
               echo "[git-sync] not configured; idling."
               exec sleep infinity
@@ -148,18 +174,18 @@ upstream:
             attempt=0
             while :; do
               attempt=$((attempt + 1))
-              code=$(curl -s -o /tmp/resp -w '%{http_code}' -X POST -H 'Content-Type: application/x-yaml' --data-binary @"$FLOW" "$API/api/v1/flows")
+              code=$(curl -s -u "$AUTH" -o /tmp/resp -w '%{http_code}' -X POST -H 'Content-Type: application/x-yaml' --data-binary @"$FLOW" "$API/api/v1/flows")
               case "$code" in
                 2*) echo "[git-sync] flow created."; break ;;
                 409|422)
-                  code=$(curl -s -o /tmp/resp -w '%{http_code}' -X PUT -H 'Content-Type: application/x-yaml' --data-binary @"$FLOW" "$API/api/v1/flows/system/git-flow-sync")
+                  code=$(curl -s -u "$AUTH" -o /tmp/resp -w '%{http_code}' -X PUT -H 'Content-Type: application/x-yaml' --data-binary @"$FLOW" "$API/api/v1/flows/system/git-flow-sync")
                   case "$code" in 2*) echo "[git-sync] flow updated."; break ;; esac ;;
               esac
               echo "[git-sync] attempt $attempt: HTTP $code: $(cat /tmp/resp 2>/dev/null)"
               if [ "$attempt" -ge 30 ]; then echo "[git-sync] giving up; idling."; exec sleep infinity; fi
               sleep 10
             done
-            curl -fsS -o /dev/null -X POST "$API/api/v1/executions/system/git-flow-sync" || echo "[git-sync] initial trigger skipped; Schedule trigger will sync."
+            curl -fsS -u "$AUTH" -o /dev/null -X POST "$API/api/v1/executions/system/git-flow-sync" || echo "[git-sync] initial trigger skipped; Schedule trigger will sync."
             echo "[git-sync] done; idling."
             exec sleep infinity
         volumeMounts:
