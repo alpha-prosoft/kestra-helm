@@ -216,6 +216,11 @@ upstream:
           basic-auth:
             username: ${KESTRA_SERVER_BASIC_AUTH_USERNAME:}
             password: ${KESTRA_SERVER_BASIC_AUTH_PASSWORD:}
+        tasks:
+          sdk:
+            authentication:
+              username: ${KESTRA_SERVER_BASIC_AUTH_USERNAME:}
+              password: ${KESTRA_SERVER_BASIC_AUTH_PASSWORD:}
     configmaps:
       - name: kestra-extra-config
         key: storage.yml

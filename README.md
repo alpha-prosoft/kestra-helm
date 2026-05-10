@@ -107,6 +107,9 @@ With `git.enabled: true`:
   to drop it entirely.
 
 The git plugin ships in the `kestra/kestra` image, so nothing extra is needed.
+`SyncFlows` also calls Kestra's own API to reconcile flows — since basic auth is
+on, the chart sets `kestra.tasks.sdk.authentication.username/password` (from the
+same `kestra-basic-auth` Secret) so the task authenticates automatically.
 
 ### Private repo
 
