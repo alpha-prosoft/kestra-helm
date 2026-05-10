@@ -6,8 +6,6 @@ version: 0.1.0
 appVersion: "v1.3.16"
 kubeVersion: ">=1.22.0-0"
 
-# Dependency is pulled from our own OCI mirror (populated by .github/workflows/build.yml
-# from helm.kestra.io) so deploys never reach the upstream chart repo.
 dependencies:
   - name: kestra
     version: 1.3.16

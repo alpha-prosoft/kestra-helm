@@ -123,9 +123,7 @@ jobs:
 
       - name: Package and push umbrella chart
         run: |
-          # Push the umbrella under a separate name so the OCI artifact does not
-          # collide with the mirrored kestra chart/image. Chart name in OCI comes
-          # from Chart.yaml's `name`, so rewrite it in a copy.
+          # Republish under a distinct name so the OCI artifact doesn't clash with the mirrored kestra chart/image.
           cp -r helm/kestra /tmp/kestra-helm
           sed -i 's/^name: kestra$/name: kestra-helm/' /tmp/kestra-helm/Chart.yaml
           helm package /tmp/kestra-helm \

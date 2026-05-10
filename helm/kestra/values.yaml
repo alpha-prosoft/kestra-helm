@@ -1,7 +1,4 @@
-# =============================================================================
-# Gateway API (HTTPRoute)
-# Exposes Kestra at `<subdomain>.<hostedZoneName>` — e.g. kestra.${PublicHostedZoneName}.
-# =============================================================================
+# Gateway API HTTPRoute, exposed at <subdomain>.<hostedZoneName>.
 gatewayApi:
   enabled: false
   subdomain: kestra
@@ -11,60 +8,56 @@ gatewayApi:
     namespace: gateway-system
     sectionName: https
 
-# =============================================================================
-# PostgreSQL — provisioned by postgres-operator (postgres.alpha-prosoft.com/v1
-# DatabaseInstance). The operator creates the database and role and writes a
-# Secret named `targetSecretName` with keys: host, port, database, username,
-# password, url. Kestra reads those via env vars (see `upstream.common.extraEnv`).
-#
-# If you change `targetSecretName` you must also update the `secretKeyRef.name`
-# entries under `upstream.common.extraEnv` to match.
-# =============================================================================
+# PostgreSQL provisioned by postgres-operator (DatabaseInstance -> Secret).
 database:
   create: true
   databaseName: kestra
   targetSecretName: kestra-db
 
-# =============================================================================
-# S3 storage bucket — provisioned by the ACK S3 controller
-# (s3.services.k8s.aws/v1alpha1 Bucket). Used as Kestra's internal storage
-# backend. `bucketName` and `region` are also rendered into the Kestra storage
-# config (the kestra-extra-config ConfigMap) so they stay in sync with the
-# Bucket CR.
-# =============================================================================
+# S3 storage bucket provisioned by the ACK S3 controller (Bucket CR).
+# region and bucketName are required and also flow into Kestra's storage config.
 aws:
-  # AWS region for the bucket and Kestra's S3 client. Required.
   region: ""
   s3:
     create: true
-    # Globally unique S3 bucket name. Required.
     bucketName: ""
     publicAccessBlock:
       blockPublicACLs: true
       blockPublicPolicy: true
       ignorePublicACLs: true
       restrictPublicBuckets: true
-    # Map of key: value tags applied to the bucket.
     tags: {}
 
-# =============================================================================
-# Values forwarded to the upstream kestra chart. Anything in
+# Git source for workflows. See README. When enabled, renders the
+# kestra-git-sync ConfigMap (the system/git-flow-sync SyncFlows flow) and the
+# git-sync-bootstrap sidecar registers it once the API is up.
+git:
+  enabled: false
+  url: ""
+  branch: main
+  gitDirectory: "_flows"
+  targetNamespace: kestra
+  includeChildNamespaces: true
+  delete: true
+  syncInterval: "*/5 * * * *"
+  # Private-repo auth. The flow reads {{ envs.git_username }} / {{ envs.git_password }}
+  # from the kestra-git-auth Secret. Either bring that Secret yourself, or set the
+  # kubeseal-encrypted plaintext values below to have this chart render a SealedSecret.
+  auth:
+    enabled: false
+    encryptedUsername: ""
+    encryptedPassword: ""
+
+# Values forwarded to the upstream kestra chart:
 # https://github.com/kestra-io/helm-charts/blob/master/charts/kestra/values.yaml
-# can be overridden here.
-# =============================================================================
 upstream:
-  # Stable name so the Service the HTTPRoute targets stays "kestra".
   nameOverride: kestra
   fullnameOverride: kestra
 
-  # Image mirrored to our registry by this repo's CI; tag defaults to the
-  # upstream chart appVersion.
   image:
     repository: docker.io/alphaprosoft/kestra
     pullPolicy: IfNotPresent
 
-  # Single standalone server, Postgres-backed, with the dind sidecar for
-  # script/shell tasks.
   deployments:
     standalone:
       enabled: true
@@ -81,7 +74,6 @@ upstream:
     worker:
       enabled: false
 
-  # dind sidecar image, also mirrored to our registry by CI.
   dind:
     enabled: true
     base:
@@ -91,9 +83,6 @@ upstream:
           tag: dind-rootless
 
   common:
-    # Pull the Postgres connection details from the Secret created by
-    # postgres-operator and expose them as env vars referenced from the Kestra
-    # datasource config below.
     extraEnv:
       - name: KESTRA_PG_HOST
         valueFrom:
@@ -120,11 +109,71 @@ upstream:
           secretKeyRef:
             name: kestra-db
             key: password
+      - name: ENV_GIT_USERNAME
+        valueFrom:
+          secretKeyRef:
+            name: kestra-git-auth
+            key: username
+            optional: true
+      - name: ENV_GIT_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: kestra-git-auth
+            key: password
+            optional: true
+
+    extraVolumes:
+      - name: kestra-git-sync
+        configMap:
+          name: kestra-git-sync
+          optional: true
+
+    extraContainers:
+      - name: git-sync-bootstrap
+        image: docker.io/alphaprosoft/kestra:v1.3.16
+        imagePullPolicy: IfNotPresent
+        command: ["/bin/sh", "-c"]
+        args:
+          - |
+            FLOW=/git-sync/flow.yml
+            API=http://127.0.0.1:8080
+            MGMT=http://127.0.0.1:8081
+            if [ ! -f "$FLOW" ]; then
+              echo "[git-sync] not configured; idling."
+              exec sleep infinity
+            fi
+            echo "[git-sync] waiting for Kestra to become ready..."
+            until curl -fsS -o /dev/null "$MGMT/health/readiness"; do sleep 5; done
+            echo "[git-sync] registering flow system/git-flow-sync"
+            attempt=0
+            while :; do
+              attempt=$((attempt + 1))
+              code=$(curl -s -o /tmp/resp -w '%{http_code}' -X POST -H 'Content-Type: application/x-yaml' --data-binary @"$FLOW" "$API/api/v1/flows")
+              case "$code" in
+                2*) echo "[git-sync] flow created."; break ;;
+                409|422)
+                  code=$(curl -s -o /tmp/resp -w '%{http_code}' -X PUT -H 'Content-Type: application/x-yaml' --data-binary @"$FLOW" "$API/api/v1/flows/system/git-flow-sync")
+                  case "$code" in 2*) echo "[git-sync] flow updated."; break ;; esac ;;
+              esac
+              echo "[git-sync] attempt $attempt: HTTP $code: $(cat /tmp/resp 2>/dev/null)"
+              if [ "$attempt" -ge 30 ]; then echo "[git-sync] giving up; idling."; exec sleep infinity; fi
+              sleep 10
+            done
+            curl -fsS -o /dev/null -X POST "$API/api/v1/executions/system/git-flow-sync" || echo "[git-sync] initial trigger skipped; Schedule trigger will sync."
+            echo "[git-sync] done; idling."
+            exec sleep infinity
+        volumeMounts:
+          - name: kestra-git-sync
+            mountPath: /git-sync
+            readOnly: true
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            memory: 128Mi
 
   configurations:
-    # Static Kestra config. Placeholders are resolved at runtime from the env
-    # vars wired above. The S3 storage block is supplied separately by the
-    # kestra-extra-config ConfigMap this umbrella renders from `.Values.aws`.
     application:
       datasources:
         postgres:

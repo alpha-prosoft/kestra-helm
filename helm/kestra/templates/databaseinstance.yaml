@@ -10,8 +10,6 @@ metadata:
     app.kubernetes.io/part-of: kestra
     app.kubernetes.io/managed-by: {{ .Release.Service }}
   annotations:
-    # Provision the database (and let ArgoCD wait for it to be Healthy) before
-    # the Kestra workload that consumes the generated Secret comes up.
     argocd.argoproj.io/sync-wave: "-1"
 spec:
   databaseName: {{ .Values.database.databaseName | quote }}
