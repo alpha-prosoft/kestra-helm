@@ -130,13 +130,13 @@ upstream:
             name: kestra-git-auth
             key: password
             optional: true
-      - name: KESTRA_SECURITY_BASIC_AUTH_USERNAME
+      - name: KESTRA_SERVER_BASIC_AUTH_USERNAME
         valueFrom:
           secretKeyRef:
             name: kestra-basic-auth
             key: username
             optional: true
-      - name: KESTRA_SECURITY_BASIC_AUTH_PASSWORD
+      - name: KESTRA_SERVER_BASIC_AUTH_PASSWORD
         valueFrom:
           secretKeyRef:
             name: kestra-basic-auth
@@ -212,6 +212,10 @@ upstream:
           type: postgres
         repository:
           type: postgres
+        server:
+          basic-auth:
+            username: ${KESTRA_SERVER_BASIC_AUTH_USERNAME:}
+            password: ${KESTRA_SERVER_BASIC_AUTH_PASSWORD:}
     configmaps:
       - name: kestra-extra-config
         key: storage.yml

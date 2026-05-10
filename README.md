@@ -65,11 +65,14 @@ the generated Secret.
 ## Basic authentication
 
 Kestra requires basic auth since 0.24 — without it the API returns `401` and the
-UI shows a setup page. The chart wires `KESTRA_SECURITY_BASIC_AUTH_USERNAME` /
-`KESTRA_SECURITY_BASIC_AUTH_PASSWORD` (and the bootstrap sidecar's API
-credentials) from a Secret named **`kestra-basic-auth`** in the release namespace
-(keys **`username`** — a valid email — and **`password`**), with `optional: true`
-so a missing Secret doesn't crash the pod (git sync just fails with `401`).
+UI shows a setup page. The chart sets `kestra.server.basic-auth.username` /
+`.password` in `_default.yml` from `${KESTRA_SERVER_BASIC_AUTH_USERNAME}` /
+`${KESTRA_SERVER_BASIC_AUTH_PASSWORD}` (and the bootstrap sidecar uses the same
+credentials for its API calls), sourced from a Secret named **`kestra-basic-auth`**
+in the release namespace (keys **`username`** — a valid email — and
+**`password`**), with `optional: true` so a missing Secret doesn't crash the pod
+(Kestra just falls back to the setup page and git sync fails with `401`).
+Config-file credentials take precedence over anything entered in the setup page.
 
 Provide that Secret yourself, or set these two values to have the chart render a
 `SealedSecret`:
