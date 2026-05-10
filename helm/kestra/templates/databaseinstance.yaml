@@ -2,7 +2,7 @@
 apiVersion: postgres.alpha-prosoft.com/v1
 kind: DatabaseInstance
 metadata:
-  name: kestra
+  name: kestra-db
   namespace: {{ .Release.Namespace }}
   labels:
     app.kubernetes.io/name: kestra
