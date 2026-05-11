@@ -25,7 +25,7 @@ data:
         includeChildNamespaces: {{ .Values.git.includeChildNamespaces }}
         delete: {{ .Values.git.delete }}
         dryRun: false
-        {{- if .Values.git.auth.enabled }}
+        {{- if .Values.git.auth }}
         username: "{{ `{{ envs.git_username }}` }}"
         password: "{{ `{{ envs.git_password }}` }}"
         {{- end }}

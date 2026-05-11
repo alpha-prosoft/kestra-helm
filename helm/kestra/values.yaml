@@ -40,29 +40,29 @@ git:
   includeChildNamespaces: true
   delete: true
   syncInterval: "*/5 * * * *"
-  # Private-repo auth. The sync flow reads {{ envs.git_username }} / {{ envs.git_password }}
-  # from the kestra-git-auth Secret. Imported flows that do their own git work should use
-  # {{ secret('GIT_USERNAME') }} / {{ secret('GIT_PASSWORD') }} — Kestra's env-var secret
-  # backend reads those from SECRET_GIT_USERNAME / SECRET_GIT_PASSWORD on the container,
-  # whose values must be base64-encoded. Bring kestra-git-auth yourself with all four
-  # keys (username, password, username_b64, password_b64), or set the kubeseal-encrypted
-  # values below to have this chart render a SealedSecret. The _b64 keys are optional;
-  # without them only the parent sync flow gets credentials.
-  auth:
-    enabled: false
-    encryptedUsername: ""
-    encryptedPassword: ""
-    encryptedUsernameBase64: ""
-    encryptedPasswordBase64: ""
+  # When true, the SyncFlows task passes {{ envs.git_username }} / {{ envs.git_password }}
+  # (resolved from the kestra-auth Secret's gitUser/gitToken keys). Imported flows that
+  # do their own git work reference the same envs.* variables.
+  auth: false
 
-# Kestra basic auth (mandatory since Kestra 0.24 — the API returns 401 until it
-# is configured). Credentials come from the kestra-basic-auth Secret (keys
-# username [a valid email] and password); the bootstrap sidecar uses them too.
-# Bring that Secret yourself, or set the kubeseal-encrypted values to have this
-# chart render a SealedSecret for it.
-basicAuth:
-  encryptedUsername: ""
-  encryptedPassword: ""
+# Single kestra-auth Secret holding all four credentials Kestra needs. Bring this
+# Secret yourself with the four keys below, or set the kubeseal-encrypted plaintext
+# values to have this chart render a SealedSecret for it.
+#
+#   basicAuthEmail    — Kestra server basic auth username (must be a valid email).
+#   basicAuthPassword — Kestra server basic auth password. The git-sync bootstrap
+#                       sidecar uses these two to authenticate its API calls.
+#   gitUser           — git username used by the SyncFlows task and any imported
+#                       flow referencing {{ envs.git_username }}.
+#   gitToken          — git password / PAT used the same way.
+#
+# Mounted into KESTRA_SERVER_BASIC_AUTH_USERNAME/PASSWORD and ENV_GIT_USERNAME/PASSWORD
+# env vars (all optional: a missing key only breaks that one feature, not the pod).
+auth:
+  encryptedBasicAuthEmail: ""
+  encryptedBasicAuthPassword: ""
+  encryptedGitUser: ""
+  encryptedGitToken: ""
 
 # Values forwarded to the upstream kestra chart:
 # https://github.com/kestra-io/helm-charts/blob/master/charts/kestra/values.yaml
@@ -128,38 +128,26 @@ upstream:
       - name: ENV_GIT_USERNAME
         valueFrom:
           secretKeyRef:
-            name: kestra-git-auth
-            key: username
+            name: kestra-auth
+            key: gitUser
             optional: true
       - name: ENV_GIT_PASSWORD
         valueFrom:
           secretKeyRef:
-            name: kestra-git-auth
-            key: password
-            optional: true
-      - name: SECRET_GIT_USERNAME
-        valueFrom:
-          secretKeyRef:
-            name: kestra-git-auth
-            key: username_b64
-            optional: true
-      - name: SECRET_GIT_PASSWORD
-        valueFrom:
-          secretKeyRef:
-            name: kestra-git-auth
-            key: password_b64
+            name: kestra-auth
+            key: gitToken
             optional: true
       - name: KESTRA_SERVER_BASIC_AUTH_USERNAME
         valueFrom:
           secretKeyRef:
-            name: kestra-basic-auth
-            key: username
+            name: kestra-auth
+            key: basicAuthEmail
             optional: true
       - name: KESTRA_SERVER_BASIC_AUTH_PASSWORD
         valueFrom:
           secretKeyRef:
-            name: kestra-basic-auth
-            key: password
+            name: kestra-auth
+            key: basicAuthPassword
             optional: true
 
     extraVolumes:
@@ -174,7 +162,7 @@ upstream:
         imagePullPolicy: IfNotPresent
         envFrom:
           - secretRef:
-              name: kestra-basic-auth
+              name: kestra-auth
               optional: true
         command: ["/bin/sh", "-c"]
         args:
@@ -182,7 +170,7 @@ upstream:
             FLOW=/git-sync/flow.yml
             API=http://127.0.0.1:8080
             MGMT=http://127.0.0.1:8081
-            AUTH="${username:-}:${password:-}"
+            AUTH="${basicAuthEmail:-}:${basicAuthPassword:-}"
             if [ ! -f "$FLOW" ]; then
               echo "[git-sync] not configured; idling."
               exec sleep infinity
