@@ -79,7 +79,7 @@ missing key only breaks the corresponding feature, not the pod):
 
 | env var on the container | Secret key | used by |
 |---|---|---|
-| `KESTRA_SERVER_BASIC_AUTH_USERNAME` | `basicAuthEmail` | `kestra.server.basic-auth.username` + `kestra.tasks.sdk.authentication.username` |
+| `KESTRA_SERVER_BASIC_AUTH_USERNAME` | `basicAuthEmail` | `kestra.server.basic-auth.username` |
 | `KESTRA_SERVER_BASIC_AUTH_PASSWORD` | `basicAuthPassword` | same, password |
 | `ENV_GIT_USERNAME` | `gitUser` | `{{ envs.git_username }}` in any flow (parent sync or imported) |
 | `ENV_GIT_PASSWORD` | `gitToken` | `{{ envs.git_password }}` in any flow |
@@ -113,6 +113,31 @@ For a GitHub personal access token, `gitUser` is typically `x-access-token`.
 > Basic auth is mandatory since Kestra 0.24 — without it the API returns `401`
 > and the UI shows a setup page (config-file credentials take precedence over
 > anything entered there).
+
+## Arbitrary sealed config files — `secrets`
+
+The `secrets` value is a map of `filename -> kubeseal-encrypted content`. Each
+entry becomes one key in a SealedSecret named **`kestra-secrets`** and lands
+as a file at `/secrets/<filename>` inside the Kestra container (mounted
+read-only via `upstream.common.extraVolumes` / `extraVolumeMounts`; the Secret
+reference is `optional: true` so an empty map is fine).
+
+```yaml
+secrets:
+  application.properties.prod: AgB...
+  extra.yml:                   AgB...
+```
+
+Seal each file's plaintext, scoped to `kestra-secrets` in the release namespace:
+
+```sh
+printf %s "$(cat application.properties.prod)" \
+  | kubeseal --raw -n kestra --name kestra-secrets   # -> secrets."application.properties.prod"
+```
+
+Use the files from inside Kestra however you'd like — e.g. add
+`/secrets/application.properties.prod` to a flow's command, or reference it
+from `upstream.configurations` if it's a Micronaut config file.
 
 ## Git source for workflows
 

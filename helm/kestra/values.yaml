@@ -64,6 +64,22 @@ auth:
   encryptedGitUser: ""
   encryptedGitToken: ""
 
+# Arbitrary config files mounted into the container at /secrets/<key>. Each
+# map entry becomes one key in a SealedSecret named kestra-secrets; values
+# must be kubeseal-encrypted plaintext, scoped to "kestra-secrets" in the
+# release namespace:
+#
+#   printf %s "$FILE_CONTENT" | kubeseal --raw -n kestra --name kestra-secrets
+#
+# Example:
+#   secrets:
+#     application.properties.prod: AgB...
+#     extra.yml:                   AgB...
+#
+# When empty, nothing is rendered and the /secrets mount is empty (the
+# Secret reference is marked optional so the pod still starts).
+secrets: {}
+
 # Values forwarded to the upstream kestra chart:
 # https://github.com/kestra-io/helm-charts/blob/master/charts/kestra/values.yaml
 upstream:
@@ -155,10 +171,19 @@ upstream:
         configMap:
           name: kestra-git-sync
           optional: true
+      - name: kestra-secrets
+        secret:
+          secretName: kestra-secrets
+          optional: true
+
+    extraVolumeMounts:
+      - name: kestra-secrets
+        mountPath: /secrets
+        readOnly: true
 
     extraContainers:
       - name: git-sync-bootstrap
-        image: docker.io/alphaprosoft/kestra:v1.3.16
+        image: docker.io/alphaprosoft/kestra:v1.3.15
         imagePullPolicy: IfNotPresent
         envFrom:
           - secretRef:
@@ -223,11 +248,6 @@ upstream:
           basic-auth:
             username: ${KESTRA_SERVER_BASIC_AUTH_USERNAME:}
             password: ${KESTRA_SERVER_BASIC_AUTH_PASSWORD:}
-        tasks:
-          sdk:
-            authentication:
-              username: ${KESTRA_SERVER_BASIC_AUTH_USERNAME:}
-              password: ${KESTRA_SERVER_BASIC_AUTH_PASSWORD:}
     configmaps:
       - name: kestra-extra-config
         key: storage.yml
