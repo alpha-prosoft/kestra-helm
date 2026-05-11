@@ -114,29 +114,62 @@ same `kestra-basic-auth` Secret) so the task authenticates automatically.
 ### Private repo
 
 Kestra flows can't read a Kubernetes Secret directly, so credentials are bridged
-through env vars on the Kestra container. Set `git.auth.enabled: true`; the
-`SyncFlows` task then uses `{{ envs.git_username }}` / `{{ envs.git_password }}`,
-which Kestra resolves from the `ENV_GIT_USERNAME` / `ENV_GIT_PASSWORD` env vars.
-The chart wires those from a Secret named **`kestra-git-auth`** in the release
-namespace (keys **`username`** and **`password`**, plain values) with
-`optional: true`, so a missing Secret only breaks git sync, not the pod.
+through env vars on the Kestra container in **two** parallel forms — one for the
+parent sync flow, one for any imported flows that themselves do git work.
 
-Provide that Secret either yourself, or by setting these two values so the chart
-renders a `SealedSecret` for it:
+Set `git.auth.enabled: true`. The chart then wires four optional env vars from a
+Secret named **`kestra-git-auth`** in the release namespace (all `optional: true`,
+so a missing Secret only breaks git auth, not the pod):
+
+| env var on the container | Secret key | value form | used by |
+|---|---|---|---|
+| `ENV_GIT_USERNAME` | `username` | plaintext | `{{ envs.git_username }}` in the parent `system/git-flow-sync` flow |
+| `ENV_GIT_PASSWORD` | `password` | plaintext | `{{ envs.git_password }}` in the parent `system/git-flow-sync` flow |
+| `SECRET_GIT_USERNAME` | `username_b64` | base64(username) | `{{ secret('GIT_USERNAME') }}` in any imported flow |
+| `SECRET_GIT_PASSWORD` | `password_b64` | base64(password) | `{{ secret('GIT_PASSWORD') }}` in any imported flow |
+
+The `SECRET_*` env vars feed Kestra's default `env-var` secret backend, whose
+contract is `SECRET_<NAME>=<base64-encoded-value>`. Without the `_b64` keys you
+can still sync flows from git, but imported flows that themselves clone a private
+repo (or otherwise need git creds) will fail to authenticate. Plaintext `envs.*`
+is **not** redacted in the Kestra UI; `secret(...)` is.
+
+Bring `kestra-git-auth` yourself with the four keys above, or set the
+kubeseal-encrypted values below to have this chart render a `SealedSecret` for
+it (the `_b64` pair is optional — set both if you have imported flows that need
+git creds):
 
 | value | becomes | key in the Secret |
 |---|---|---|
 | `git.auth.encryptedUsername` | `SealedSecret.spec.encryptedData.username` | `username` |
 | `git.auth.encryptedPassword` | `SealedSecret.spec.encryptedData.password` | `password` |
+| `git.auth.encryptedUsernameBase64` | `SealedSecret.spec.encryptedData.username_b64` | `username_b64` |
+| `git.auth.encryptedPasswordBase64` | `SealedSecret.spec.encryptedData.password_b64` | `password_b64` |
 
-Seal the **plaintext** credentials, scoped to that name and namespace:
+Seal the **plaintext** for the first pair and the **base64-encoded plaintext**
+for the second, scoped to that name and namespace:
 
 ```sh
-printf %s 'x-access-token' | kubeseal --raw -n kestra --name kestra-git-auth   # -> git.auth.encryptedUsername
-printf %s "$GIT_PAT"       | kubeseal --raw -n kestra --name kestra-git-auth   # -> git.auth.encryptedPassword
+USER='x-access-token'
+PAT="$GIT_PAT"
+
+printf %s "$USER"          | kubeseal --raw -n kestra --name kestra-git-auth   # -> git.auth.encryptedUsername
+printf %s "$PAT"           | kubeseal --raw -n kestra --name kestra-git-auth   # -> git.auth.encryptedPassword
+printf %s "$USER" | base64 | kubeseal --raw -n kestra --name kestra-git-auth   # -> git.auth.encryptedUsernameBase64
+printf %s "$PAT"  | base64 | kubeseal --raw -n kestra --name kestra-git-auth   # -> git.auth.encryptedPasswordBase64
 ```
 
 For a GitHub personal access token, `username` is typically `x-access-token`.
+
+Imported flows then look like:
+
+```yaml
+- id: clone
+  type: io.kestra.plugin.git.Clone
+  url: https://github.com/your-org/your-repo
+  username: "{{ secret('GIT_USERNAME') }}"
+  password: "{{ secret('GIT_PASSWORD') }}"
+```
 
 ## Required values
 
