@@ -14,7 +14,9 @@ metadata:
     app.kubernetes.io/managed-by: {{ .Release.Service }}
 spec:
   parentRefs:
-    - name: {{ .Values.gatewayApi.parentRef.name }}
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ .Values.gatewayApi.parentRef.name }}
       namespace: {{ .Values.gatewayApi.parentRef.namespace }}
       sectionName: {{ .Values.gatewayApi.parentRef.sectionName }}
   hostnames:
@@ -25,6 +27,9 @@ spec:
             type: PathPrefix
             value: /
       backendRefs:
-        - name: {{ $svc }}
+        - group: ""
+          kind: Service
+          name: {{ $svc }}
           port: {{ $port }}
+          weight: 1
 {{- end }}
